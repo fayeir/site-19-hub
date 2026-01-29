@@ -6,13 +6,21 @@ import { WikiSection } from '../types';
 
 const Wiki: React.FC = () => {
   const [wikiSections, setWikiSections] = useState<WikiSection[]>([]);
+  const [loading, setLoading] = useState(true);
   const categories = ['Tous', 'Général', 'Départements', 'Protocoles'] as const;
   const [activeCat, setActiveCat] = useState<typeof categories[number]>('Tous');
 
   useEffect(() => {
     const loadWiki = async () => {
-      const sections = await supabaseService.getWiki();
-      setWikiSections(sections);
+      setLoading(true);
+      try {
+        const sections = await supabaseService.getWiki();
+        setWikiSections(sections);
+      } catch (error) {
+        console.error('Erreur lors du chargement du wiki:', error);
+      } finally {
+        setLoading(false);
+      }
     };
     loadWiki();
   }, []);
@@ -20,6 +28,15 @@ const Wiki: React.FC = () => {
   const filtered = activeCat === 'Tous' 
     ? wikiSections 
     : wikiSections.filter(s => s.category === activeCat);
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-8 py-20">
+        <h1 className="text-7xl font-black italic uppercase tracking-tighter mb-6">Wiki Central.</h1>
+        <div className="text-center text-gray-500">Chargement...</div>
+      </div>
+    );
+  }
 
   const getIcon = (iconName: string) => {
     switch (iconName) {
@@ -54,8 +71,11 @@ const Wiki: React.FC = () => {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {filtered.map(section => (
+      {filtered.length === 0 ? (
+        <div className="text-center text-gray-500 italic">Aucune section disponible.</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {filtered.map(section => (
           <div key={section.id} className="bg-[#151a26] p-12 rounded-[40px] border border-white/5 hover:bg-white/5 transition-all group cursor-pointer relative overflow-hidden">
             <div className="absolute top-0 right-0 p-8 text-[10px] font-black uppercase text-blue-500/50 tracking-widest">{section.category}</div>
             <div className="w-16 h-16 text-blue-500 mb-10 group-hover:scale-110 transition-transform duration-500">
@@ -65,7 +85,8 @@ const Wiki: React.FC = () => {
             <p className="text-gray-500 leading-relaxed text-sm mb-8">{section.description}</p>
           </div>
         ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

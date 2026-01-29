@@ -35,45 +35,63 @@ export const supabaseService = {
         return { user: null, error: 'Erreur lors de la création du compte' };
       }
 
-      // Vérifier si c'est le premier utilisateur
-      const { data: existingUsers } = await supabase
+      // Attendre un peu pour que le trigger crée le profil (si trigger configuré)
+      // Sinon, créer manuellement le profil
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Vérifier si le profil existe déjà (créé par le trigger)
+      let userData = null;
+      const { data: existingProfile } = await supabase
         .from(TABLES.users)
-        .select('id')
-        .limit(1);
+        .select('id, username, email, character_name, grade, clearance, joined_date')
+        .eq('id', authData.user.id)
+        .maybeSingle();
 
-      const isFirstUser = !existingUsers || existingUsers.length === 0;
+      if (existingProfile) {
+        // Le profil a été créé par le trigger
+        userData = existingProfile;
+      } else {
+        // Créer manuellement le profil si le trigger n'existe pas
+        const { data: existingUsers } = await supabase
+          .from(TABLES.users)
+          .select('id')
+          .limit(1);
 
-      // Créer le profil utilisateur dans la table users
-      const joinedDate = new Date().toLocaleDateString('fr-FR');
-      const { error: insertError } = await supabase
-        .from(TABLES.users)
-        .insert([{
-          id: authData.user.id,
-          username,
-          email,
-          character_name: characterName,
-          grade: isFirstUser ? 'Fondateur' : 'Joueur',
-          clearance: isFirstUser ? 5 : 1,
-          joined_date: joinedDate
-        }]);
+        const isFirstUser = !existingUsers || existingUsers.length === 0;
+        const joinedDate = new Date().toLocaleDateString('fr-FR');
 
-      if (insertError) {
-        return { user: null, error: insertError.message };
+        const { data: insertedProfile, error: insertError } = await supabase
+          .from(TABLES.users)
+          .insert([{
+            id: authData.user.id,
+            username,
+            email,
+            character_name: characterName,
+            grade: isFirstUser ? 'Fondateur' : 'Joueur',
+            clearance: isFirstUser ? 5 : 1,
+            joined_date: joinedDate
+          }])
+          .select('id, username, email, character_name, grade, clearance, joined_date')
+          .single();
+
+        if (insertError) {
+          console.error('Erreur lors de la création du profil:', insertError);
+          return { user: null, error: `Erreur lors de la création du profil: ${insertError.message}` };
+        }
+
+        userData = insertedProfile;
       }
 
+      // Mapper vers le type User
       const newUser: User = {
-        id: authData.user.id,
-        username,
-        email,
-        characterName,
-        grade: isFirstUser ? 'Fondateur' : 'Joueur',
-        clearance: isFirstUser ? 5 : 1,
-        joinedDate
+        id: userData.id,
+        username: userData.username,
+        email: userData.email,
+        characterName: userData.character_name,
+        grade: userData.grade,
+        clearance: userData.clearance,
+        joinedDate: userData.joined_date
       };
-
-      if (insertError) {
-        return { user: null, error: insertError.message };
-      }
 
       return { user: newUser, error: null };
     } catch (error: any) {
@@ -99,11 +117,16 @@ export const supabaseService = {
       // Récupérer les données utilisateur depuis la table users
       const { data: userData, error: userError } = await supabase
         .from(TABLES.users)
-        .select('*')
+        .select('id, username, email, character_name, grade, clearance, joined_date')
         .eq('id', authData.user.id)
-        .single();
+        .maybeSingle();
 
-      if (userError || !userData) {
+      if (userError) {
+        console.error('Erreur lors de la récupération du profil:', userError);
+        return { user: null, error: 'Erreur lors de la récupération du profil' };
+      }
+
+      if (!userData) {
         return { user: null, error: 'Profil utilisateur introuvable' };
       }
 
@@ -131,17 +154,32 @@ export const supabaseService = {
 
   async getCurrentUser(): Promise<User | null> {
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError) {
+        console.warn('Erreur auth:', authError);
+        return null;
+      }
       
       if (!authUser) {
         return null;
       }
 
-      const { data: userData } = await supabase
+      const { data: userData, error } = await supabase
         .from(TABLES.users)
-        .select('*')
+        .select('id, username, email, character_name, grade, clearance, joined_date')
         .eq('id', authUser.id)
-        .single();
+        .maybeSingle();
+
+      if (error) {
+        // Ne pas bloquer si l'erreur est 406 ou si l'utilisateur n'existe pas encore
+        if (error.code === 'PGRST116' || error.message?.includes('406')) {
+          console.warn('Profil utilisateur non trouvé dans la table users');
+          return null;
+        }
+        console.error('Erreur lors de la récupération de l\'utilisateur:', error);
+        return null;
+      }
 
       if (!userData) return null;
 
@@ -227,17 +265,29 @@ export const supabaseService = {
   },
 
   async getBlog(): Promise<BlogPost[]> {
-    const { data, error } = await supabase
-      .from(TABLES.blog)
-      .select('*')
-      .order('date', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.blog)
+        .select('*')
+        .order('date', { ascending: false });
 
-    if (error) {
-      console.error('Erreur lors de la récupération du blog:', error);
-      return BLOG_POSTS; // Fallback vers les constantes
+      if (error) {
+        console.warn('Erreur lors de la récupération du blog depuis Supabase:', error);
+        console.log('Utilisation des données par défaut (constantes)');
+        return BLOG_POSTS; // Fallback vers les constantes
+      }
+
+      if (!data || data.length === 0) {
+        console.log('Aucune donnée dans Supabase, utilisation des constantes');
+        return BLOG_POSTS;
+      }
+
+      console.log(`✅ ${data.length} articles de blog chargés depuis Supabase`);
+      return data as BlogPost[];
+    } catch (error) {
+      console.error('Erreur inattendue lors de la récupération du blog:', error);
+      return BLOG_POSTS;
     }
-
-    return (data || BLOG_POSTS) as BlogPost[];
   },
 
   async saveBlog(blog: BlogPost[]): Promise<{ error: string | null }> {
@@ -252,17 +302,29 @@ export const supabaseService = {
   },
 
   async getLore(): Promise<LoreEvent[]> {
-    const { data, error } = await supabase
-      .from(TABLES.lore)
-      .select('*')
-      .order('date', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.lore)
+        .select('*')
+        .order('date', { ascending: false });
 
-    if (error) {
-      console.error('Erreur lors de la récupération du lore:', error);
-      return LORE_EVENTS; // Fallback
+      if (error) {
+        console.warn('Erreur lors de la récupération du lore depuis Supabase:', error);
+        console.log('Utilisation des données par défaut (constantes)');
+        return LORE_EVENTS; // Fallback
+      }
+
+      if (!data || data.length === 0) {
+        console.log('Aucune donnée dans Supabase, utilisation des constantes');
+        return LORE_EVENTS;
+      }
+
+      console.log(`✅ ${data.length} événements de lore chargés depuis Supabase`);
+      return data as LoreEvent[];
+    } catch (error) {
+      console.error('Erreur inattendue lors de la récupération du lore:', error);
+      return LORE_EVENTS;
     }
-
-    return (data || LORE_EVENTS) as LoreEvent[];
   },
 
   async saveLore(lore: LoreEvent[]): Promise<{ error: string | null }> {
@@ -276,17 +338,29 @@ export const supabaseService = {
   },
 
   async getWiki(): Promise<WikiSection[]> {
-    const { data, error } = await supabase
-      .from(TABLES.wiki)
-      .select('*')
-      .order('category', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.wiki)
+        .select('*')
+        .order('category', { ascending: true });
 
-    if (error) {
-      console.error('Erreur lors de la récupération du wiki:', error);
-      return WIKI_SECTIONS; // Fallback
+      if (error) {
+        console.warn('Erreur lors de la récupération du wiki depuis Supabase:', error);
+        console.log('Utilisation des données par défaut (constantes)');
+        return WIKI_SECTIONS; // Fallback
+      }
+
+      if (!data || data.length === 0) {
+        console.log('Aucune donnée dans Supabase, utilisation des constantes');
+        return WIKI_SECTIONS;
+      }
+
+      console.log(`✅ ${data.length} sections wiki chargées depuis Supabase`);
+      return data as WikiSection[];
+    } catch (error) {
+      console.error('Erreur inattendue lors de la récupération du wiki:', error);
+      return WIKI_SECTIONS;
     }
-
-    return (data || WIKI_SECTIONS) as WikiSection[];
   },
 
   async saveWiki(wiki: WikiSection[]): Promise<{ error: string | null }> {

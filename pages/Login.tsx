@@ -47,7 +47,16 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     );
 
     if (registerError || !user) {
-      setError(registerError || "Erreur lors de l'inscription.");
+      // Gestion spéciale pour le rate limiting
+      let errorMessage = registerError || "Erreur lors de l'inscription.";
+      
+      if (registerError?.includes('429') || registerError?.includes('Too Many Requests')) {
+        errorMessage = "Trop de tentatives. Veuillez patienter 40 secondes avant de réessayer.";
+      } else if (registerError?.includes('For security purposes')) {
+        errorMessage = "Pour des raisons de sécurité, veuillez attendre 40 secondes avant de réessayer.";
+      }
+      
+      setError(errorMessage);
       setLoading(false);
       return;
     }

@@ -57,6 +57,11 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can view all users" ON users
   FOR SELECT USING (true);
 
+-- Les utilisateurs peuvent insérer leur propre profil lors de l'inscription
+CREATE POLICY "Users can insert own profile" ON users
+  FOR INSERT 
+  WITH CHECK (auth.uid() = id);
+
 -- Les utilisateurs peuvent mettre à jour leur propre profil
 CREATE POLICY "Users can update own profile" ON users
   FOR UPDATE USING (auth.uid() = id);

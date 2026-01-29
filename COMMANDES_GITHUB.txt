@@ -1,0 +1,39 @@
+# Mettre à jour le site sur GitHub après une mise à jour
+
+## Commandes à exécuter dans Git Bash (dans le dossier du projet)
+
+# 1. Voir les fichiers modifiés
+git status
+
+# 2. Ajouter tous les fichiers modifiés
+git add .
+
+# 3. Faire un commit avec un message descriptif
+git commit -m "Mise à jour : [décrivez vos changements]"
+
+# Exemple : git commit -m "Mise à jour : correction chargement Brave, timeout, données Supabase"
+
+# 4. Envoyer les modifications sur GitHub
+git push origin main
+
+---
+
+## Résumé rapide (tout en une fois)
+
+git add .
+git commit -m "Mise à jour du site"
+git push origin main
+
+---
+
+## Si vous avez une erreur
+
+### "nothing to commit, working tree clean"
+= Aucun fichier modifié, tout est déjà à jour.
+
+### "failed to push" ou erreur d'authentification
+= Vous devez vous authentifier (token GitHub ou mot de passe).
+
+### "branch 'main' does not exist"
+= Utilisez : git push origin master
+(ou créez la branche main : git branch -M main)

@@ -16,22 +16,69 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    let subscription: { unsubscribe: () => void } | null = null;
+    let isResolved = false;
+
     // Vérifier l'utilisateur actuel au chargement
     const checkUser = async () => {
-      const currentUser = await supabaseService.getCurrentUser();
-      setUser(currentUser);
-      setLoading(false);
+      try {
+        const currentUser = await supabaseService.getCurrentUser();
+        if (!isResolved) {
+          setUser(currentUser);
+          setLoading(false);
+          isResolved = true;
+          clearTimeout(timeoutId);
+        }
+      } catch (error) {
+        console.error('Erreur lors de la vérification de l\'utilisateur:', error);
+        if (!isResolved) {
+          setLoading(false);
+          isResolved = true;
+          clearTimeout(timeoutId);
+        }
+      }
     };
+
+    // Timeout de sécurité pour éviter un chargement infini
+    // Augmenté à 8 secondes pour les navigateurs avec protection de la vie privée (Brave, etc.)
+    timeoutId = setTimeout(() => {
+      if (!isResolved) {
+        console.warn('Timeout de chargement utilisateur - passage en mode non-connecté (les données continuent à se charger)');
+        setLoading(false);
+        isResolved = true;
+      }
+    }, 8000); // 8 secondes max
 
     checkUser();
 
     // Écouter les changements d'authentification
-    const { data: { subscription } } = supabaseService.onAuthStateChange((user) => {
-      setUser(user);
-    });
+    try {
+      const { data: { subscription: sub } } = supabaseService.onAuthStateChange((user) => {
+        if (!isResolved) {
+          setUser(user);
+          setLoading(false);
+          isResolved = true;
+          clearTimeout(timeoutId);
+        } else {
+          setUser(user);
+        }
+      });
+      subscription = sub;
+    } catch (error) {
+      console.error('Erreur lors de l\'écoute des changements d\'auth:', error);
+      if (!isResolved) {
+        setLoading(false);
+        isResolved = true;
+        clearTimeout(timeoutId);
+      }
+    }
 
     return () => {
-      subscription.unsubscribe();
+      clearTimeout(timeoutId);
+      if (subscription) {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 
